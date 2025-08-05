@@ -41,7 +41,6 @@ ABLE/
 ├── able.py          # Main ABLE implementation and CLI
 ├── datasets.py      # Dataset loading and configuration
 ├── models.py        # Model definitions and training
-├── example.py       # Example usage
 ├── README.md        # This documentation
 └── requirements.txt # Dependencies
 ```
@@ -194,7 +193,6 @@ python able.py --model MLP --dataset adult --test-index 20 --attack HOPSKIPJUMP
 ### Adversarial Generation
 - **Dual Adversarial Pairs**: Generates pairs that bracket the decision boundary
 - **Robust Implementation**: Handles failed attacks gracefully with adaptive epsilon adjustment
-- **FGSM Retry Mechanism**: Automatically increases epsilon (0.6→2.5) when FGSM attacks fail
 - **Multiple Algorithms**: Supports gradient-based and geometric attack methods
 
 ### Explanation Quality
