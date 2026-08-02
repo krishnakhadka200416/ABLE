@@ -16,7 +16,7 @@ import os
 import argparse
 import copy
 from torch.autograd import Variable
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Ridge, LogisticRegression
 
 # ART (Adversarial Robustness Toolbox)
 from art.estimators.classification import PyTorchClassifier
@@ -500,6 +500,43 @@ class SoftLinearSurrogate:
     def predict(self, X):
         return np.argmax(self.predict_proba(X), axis=1)
 
+class SoftCESurrogate:
+    """
+    Linear surrogate trained with cross-entropy on the target model's
+    predicted probabilities (soft targets), for deployments where the model
+    exposes predicted probabilities. No hard labels are used. Implemented by
+    duplicating each point once per class, weighted by the target model's
+    probability for that class, which reproduces cross-entropy against soft
+    targets exactly (equivalent to minimizing KL(target || surrogate) over
+    the sigmoid/softmax-of-linear family).
+    """
+    def __init__(self, C=1.0):
+        self.C = C
+        self.lr = None
+
+    def fit(self, X, probs):
+        probs = np.asarray(probs, dtype=np.float64)
+        eps = 1e-6
+        probs = np.clip(probs, eps, 1.0)
+        probs = probs / probs.sum(axis=1, keepdims=True)
+        n, k = probs.shape
+        X_rep = np.tile(X, (k, 1))
+        y_rep = np.repeat(np.arange(k), n)
+        w_rep = probs.T.reshape(-1)
+        self.lr = LogisticRegression(C=self.C, random_state=42, max_iter=1000)
+        self.lr.fit(X_rep, y_rep, sample_weight=w_rep)
+        return self
+
+    @property
+    def coef_(self):
+        return self.lr.coef_
+
+    def predict_proba(self, X):
+        return self.lr.predict_proba(X)
+
+    def predict(self, X):
+        return self.lr.predict(X)
+
 def get_topk_features_from_lr(lr_model, k=5):
     """Get top-k features from the linear surrogate's coefficients."""
     coefs = lr_model.coef_
@@ -518,12 +555,13 @@ def get_topk_features_from_lr(lr_model, k=5):
 ###############################################################################
 # ABLE CORE IMPLEMENTATION
 ###############################################################################
-def generate_able_explanation(classifier, x_test, X_train, feature_names, 
+def generate_able_explanation(classifier, x_test, X_train, feature_names,
                              scaler, ht, attack_method='PGD', num_adversarial_pairs=50,
-                             neighbor_radius=0.5, num_neighbors=100, top_k=5):
+                             neighbor_radius=0.5, num_neighbors=100, top_k=5,
+                             surrogate='logit_ridge'):
     """
     Generate ABLE explanation for a test instance.
-    
+
     Args:
         classifier: Trained ART classifier
         x_test: Test instance (1D array)
@@ -536,7 +574,11 @@ def generate_able_explanation(classifier, x_test, X_train, feature_names,
         neighbor_radius: Radius for neighborhood generation
         num_neighbors: Number of neighbors to generate
         top_k: Number of top features to return
-        
+        surrogate: Surrogate fitting variant, chosen by model access level:
+            'logit_ridge' - ridge regression on the target model's logits
+                (log-odds recovered from its predicted probabilities)
+            'prob_ce' - cross-entropy on the predicted probabilities directly
+
     Returns:
         dict: Results containing explanation and metrics
     """
@@ -581,14 +623,20 @@ def generate_able_explanation(classifier, x_test, X_train, feature_names,
     # Combine neighbors and adversarial examples
     X_combined = np.vstack([X_neighbors, X_adv_all])
     
-    # Get soft labels (black-box probabilities) for the combined data
+    # Get the target model's predicted probabilities for the combined data.
+    # Both surrogate variants train on these; no hard labels are used.
     y_pred_bb = np.asarray(classifier.predict(X_combined))
 
-    # Train the linear surrogate on soft labels: ridge regression on the
-    # black box's logits, probabilities recovered via sigmoid (softmax for
-    # multi-class). The surrogate always has the same number of classes as
-    # the black box, so no shape reconciliation is needed.
-    lr_model = SoftLinearSurrogate(alpha=1.0)
+    # Fit the linear surrogate according to the model access level:
+    # 'logit_ridge': ridge regression on the target model's logits, with
+    #   probabilities recovered via sigmoid (softmax for multi-class).
+    # 'prob_ce': cross-entropy against the predicted probabilities directly.
+    # The surrogate always has the same number of classes as the target
+    # model, so no shape reconciliation is needed.
+    if surrogate == 'prob_ce':
+        lr_model = SoftCESurrogate(C=1.0)
+    else:
+        lr_model = SoftLinearSurrogate(alpha=1.0)
     lr_model.fit(X_combined, y_pred_bb)
 
     y_pred_lr = lr_model.predict_proba(X_combined)
@@ -732,7 +780,17 @@ Examples:
         choices=['auto', 'cuda', 'cpu'],
         help='Device to use (default: auto)'
     )
-    
+
+    parser.add_argument(
+        '--surrogate',
+        type=str,
+        default='logit_ridge',
+        choices=['logit_ridge', 'prob_ce'],
+        help='Surrogate fitting variant based on model access: logit_ridge '
+             '(ridge regression on the target model\'s logits, default) or '
+             'prob_ce (cross-entropy on predicted probabilities only)'
+    )
+
     return parser.parse_args()
 
 def main():
@@ -775,13 +833,15 @@ def main():
         num_adversarial_pairs=args.adversarial_pairs,
         neighbor_radius=args.radius,
         num_neighbors=args.neighbors,
-        top_k=args.top_k
+        top_k=args.top_k,
+        surrogate=args.surrogate
     )
-    
+
     if result:
         print(f"\nDataset: {args.dataset}")
         print(f"Model: {args.model}")
         print(f"Attack Method: ABLE_{args.attack}")
+        print(f"Surrogate: {args.surrogate}")
         print(f"Test Instance: {args.test_index}")
         print(f"Top-{args.top_k} Features:")
         for i, (feature_name, feature_value) in enumerate(result['feature_values'], 1):

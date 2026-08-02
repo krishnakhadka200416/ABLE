@@ -20,7 +20,12 @@ For each generated neighborhood point $D$:
 - The pair $(A, A')$ forms an adversarial bracket that closely encloses the relevant decision boundary for $x_{\text{test}}$.
 
 ### 3. Surrogate Model Training
-A linear surrogate is trained on soft labels: ridge regression is fitted to the black box's logits at the adversarial pairs (and neighborhood points), and probabilities are recovered through a sigmoid (softmax in the multi-class case). The surrogate therefore keeps the same functional form as logistic regression, but matches the black box's predicted probabilities rather than only its hard labels, which yields substantially higher local fidelity. The coefficients of this surrogate model are then used to identify the top‑k important features that influence the prediction of $x_{\text{test}}$.
+A linear surrogate of the form $\sigma(w^\top x + b)$ (softmax in the multi-class case) is fitted to the target model's predicted probabilities at the adversarial pairs and neighborhood points. No hard labels are used. Two fitting variants are provided, selected by the level of model access (`--surrogate`):
+
+- **`logit_ridge`** (default): ridge regression fitted to the target model's logits, i.e. the log-odds recovered from its predicted probabilities, with probabilities read out through a sigmoid (softmax for multi-class). This matches the target model's confidence directly and yields the highest local fidelity.
+- **`prob_ce`**: cross-entropy fitted against the predicted probabilities directly (soft-target distillation, equivalent to minimizing the KL divergence between target model and surrogate). This variant never leaves probability space, which makes it robust when the exposed probabilities are quantized or saturated.
+
+Both variants require only query access to predicted probabilities. The coefficients of the fitted surrogate are then used to identify the top‑k important features that influence the prediction of $x_{\text{test}}$.
 
 ## Key Features
 
@@ -115,6 +120,7 @@ python able.py --model MLP --dataset mushroom --test-index 2 --attack HOPSKIPJUM
 | `--radius` | float | No | - | 0.5 | Neighborhood radius for local sampling |
 | `--neighbors` | int | No | - | 100 | Number of neighbors to generate |
 | `--device` | str | No | auto, cuda, cpu | auto | Computing device to use |
+| `--surrogate` | str | No | logit_ridge, prob_ce | logit_ridge | Surrogate fitting variant: ridge on target logits, or cross-entropy on predicted probabilities |
 
 ## Examples
 
@@ -196,7 +202,7 @@ python able.py --model MLP --dataset adult --test-index 20 --attack HOPSKIPJUMP
 - **Multiple Algorithms**: Supports gradient-based and geometric attack methods
 
 ### Explanation Quality
-- **Soft-Label Surrogate**: Ridge regression on black-box logits with sigmoid (softmax for multi-class) output, matching the black box's probabilities instead of hard labels
+- **Soft-Target Surrogates**: Two variants by model access, both trained on the target model's predicted probabilities with no hard labels: ridge regression on logits (`logit_ridge`, default) and cross-entropy on probabilities (`prob_ce`)
 - **Feature Ranking**: Ranks features by absolute coefficient magnitude from surrogate model
 - **Multi-Class Handling**: Properly handles multi-class surrogate coefficients
 
