@@ -11,7 +11,6 @@ Classes:
 
 import numpy as np
 from typing import Set, Union
-from sklearn.linear_model import LogisticRegression
 
 
 class FidelityCalculator:
@@ -101,13 +100,13 @@ class JaccardCalculator:
         return len(inter)/len(union) if len(union) > 0 else 0.
     
     @staticmethod
-    def get_topk_features_from_lr(lr_model: LogisticRegression, k: int = 5) -> Set[int]:
+    def get_topk_features_from_lr(lr_model, k: int = 5) -> Set[int]:
         """
-        Extract top-k features from logistic regression model.
-        
+        Extract top-k features from the linear surrogate model
+        (ridge regression on black-box logits with sigmoid/softmax output).
 
         Args:
-            lr_model: Trained logistic regression model
+            lr_model: Trained linear surrogate model (exposes coef_)
             k: Number of top features to extract
             
         Returns:
@@ -144,17 +143,17 @@ class JaccardCalculator:
             print(f"Error extracting top-k features from LIME: {e}")
             return set()
     
-    def compare_lime_vs_able(self, lime_explanation, predicted_label: int, 
-                                 able_model: LogisticRegression, k: int = 5) -> float:
+    def compare_lime_vs_able(self, lime_explanation, predicted_label: int,
+                                 able_model, k: int = 5) -> float:
         """
         Compare feature importance between LIME and ABLE explanations.
-        
 
-        
+
+
         Args:
             lime_explanation: LIME explanation object
             predicted_label: Predicted label
-            able_model: ABLE logistic regression model
+            able_model: ABLE linear surrogate model
             k: Number of top features to compare
             
         Returns:

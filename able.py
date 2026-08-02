@@ -16,7 +16,7 @@ import os
 import argparse
 import copy
 from torch.autograd import Variable
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import Ridge
 
 # ART (Adversarial Robustness Toolbox)
 from art.estimators.classification import PyTorchClassifier
@@ -458,8 +458,50 @@ def generate_neighborhood(x0, radius=0.5, n_samples=50, clip_min=None, clip_max=
         X_perturbed = np.clip(X_perturbed, clip_min, clip_max)
     return X_perturbed.astype(np.float32)
 
+class SoftLinearSurrogate:
+    """
+    Linear surrogate trained on soft labels: ridge regression fitted to the
+    black box's logits, with probabilities recovered through a sigmoid
+    (softmax in the multi-class case). The model keeps the same functional
+    form as logistic regression (sigmoid of a linear function), so its
+    coefficients are used for top-k feature importance the same way.
+    """
+    def __init__(self, alpha=1.0):
+        self.ridge = Ridge(alpha=alpha)
+        self.n_classes_ = None
+
+    def fit(self, X, probs):
+        eps = 1e-4
+        probs = np.clip(np.asarray(probs, dtype=np.float64), eps, 1 - eps)
+        self.n_classes_ = probs.shape[1]
+        if self.n_classes_ == 2:
+            # Binary: fit the log-odds of class 1, recover with a sigmoid
+            z = np.log(probs[:, 1] / (1 - probs[:, 1]))
+        else:
+            # Multi-class: fit per-class log-probabilities, recover with softmax
+            z = np.log(probs)
+        self.ridge.fit(X, z)
+        return self
+
+    @property
+    def coef_(self):
+        c = self.ridge.coef_
+        return c[None, :] if c.ndim == 1 else c
+
+    def predict_proba(self, X):
+        z = self.ridge.predict(X)
+        if self.n_classes_ == 2:
+            p1 = 1.0 / (1.0 + np.exp(-z))
+            return np.column_stack([1 - p1, p1])
+        z = z - z.max(axis=1, keepdims=True)
+        e = np.exp(z)
+        return e / e.sum(axis=1, keepdims=True)
+
+    def predict(self, X):
+        return np.argmax(self.predict_proba(X), axis=1)
+
 def get_topk_features_from_lr(lr_model, k=5):
-    """Get top-k features from logistic regression coefficients."""
+    """Get top-k features from the linear surrogate's coefficients."""
     coefs = lr_model.coef_
     if coefs.ndim == 1:
         # Binary classification case
@@ -539,31 +581,18 @@ def generate_able_explanation(classifier, x_test, X_train, feature_names,
     # Combine neighbors and adversarial examples
     X_combined = np.vstack([X_neighbors, X_adv_all])
     
-    # Get predictions for combined data
-    y_combined = np.argmax(classifier.predict(X_combined), axis=1)
-    
-    # Train logistic regression surrogate
-    lr_model = LogisticRegression(
-        C=1.0, 
-        solver='liblinear', 
-        random_state=42, 
-        max_iter=1000
-    )
-    lr_model.fit(X_combined, y_combined)
-    
+    # Get soft labels (black-box probabilities) for the combined data
+    y_pred_bb = np.asarray(classifier.predict(X_combined))
+
+    # Train the linear surrogate on soft labels: ridge regression on the
+    # black box's logits, probabilities recovered via sigmoid (softmax for
+    # multi-class). The surrogate always has the same number of classes as
+    # the black box, so no shape reconciliation is needed.
+    lr_model = SoftLinearSurrogate(alpha=1.0)
+    lr_model.fit(X_combined, y_pred_bb)
+
     y_pred_lr = lr_model.predict_proba(X_combined)
-    y_pred_bb = classifier.predict(X_combined)
-    
-    # Handle shape mismatch between black-box and surrogate predictions
-    if y_pred_bb.shape[1] != y_pred_lr.shape[1]:
-        # If surrogate has fewer classes, pad with zeros
-        if y_pred_lr.shape[1] < y_pred_bb.shape[1]:
-            padding = np.zeros((y_pred_lr.shape[0], y_pred_bb.shape[1] - y_pred_lr.shape[1]))
-            y_pred_lr = np.hstack([y_pred_lr, padding])
-        # If surrogate has more classes, truncate
-        elif y_pred_lr.shape[1] > y_pred_bb.shape[1]:
-            y_pred_lr = y_pred_lr[:, :y_pred_bb.shape[1]]
-    
+
     # Get top-k features
     top_features = get_topk_features_from_lr(lr_model, k=top_k)
     top_feature_names = [feature_names[i] for i in sorted(top_features)]

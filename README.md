@@ -20,7 +20,7 @@ For each generated neighborhood point $D$:
 - The pair $(A, A')$ forms an adversarial bracket that closely encloses the relevant decision boundary for $x_{\text{test}}$.
 
 ### 3. Surrogate Model Training
-A simple linear model (e.g., logistic regression) is trained on the adversarial pairs. The coefficients of this surrogate model are then used to identify the top‑k important features that influence the prediction of $x_{\text{test}}$.
+A linear surrogate is trained on soft labels: ridge regression is fitted to the black box's logits at the adversarial pairs (and neighborhood points), and probabilities are recovered through a sigmoid (softmax in the multi-class case). The surrogate therefore keeps the same functional form as logistic regression, but matches the black box's predicted probabilities rather than only its hard labels, which yields substantially higher local fidelity. The coefficients of this surrogate model are then used to identify the top‑k important features that influence the prediction of $x_{\text{test}}$.
 
 ## Key Features
 
@@ -196,8 +196,9 @@ python able.py --model MLP --dataset adult --test-index 20 --attack HOPSKIPJUMP
 - **Multiple Algorithms**: Supports gradient-based and geometric attack methods
 
 ### Explanation Quality
+- **Soft-Label Surrogate**: Ridge regression on black-box logits with sigmoid (softmax for multi-class) output, matching the black box's probabilities instead of hard labels
 - **Feature Ranking**: Ranks features by absolute coefficient magnitude from surrogate model
-- **Multi-Class Handling**: Properly handles multi-class logistic regression coefficients
+- **Multi-Class Handling**: Properly handles multi-class surrogate coefficients
 
 
 ## Technical Requirements
