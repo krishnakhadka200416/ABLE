@@ -20,12 +20,12 @@ For each generated neighborhood point $D$:
 - The pair $(A, A')$ forms an adversarial bracket that closely encloses the relevant decision boundary for $x_{\text{test}}$.
 
 ### 3. Surrogate Model Training
-A linear surrogate of the form $\sigma(w^\top x + b)$ (softmax in the multi-class case) is fitted to the target model's predicted probabilities at the adversarial pairs and neighborhood points. No hard labels are used. Two fitting variants are provided, selected by the level of model access (`--surrogate`):
+A linear surrogate is trained to mimic the target model in terms of its prediction probabilities at the adversarial pairs and neighborhood points. Two variants are provided, based on the level of access to the target model (`--surrogate`):
 
-- **`logit_ridge`** (default): ridge regression fitted to the target model's logits, i.e. the log-odds recovered from its predicted probabilities, with probabilities read out through a sigmoid (softmax for multi-class). This matches the target model's confidence directly and yields the highest local fidelity.
-- **`prob_ce`**: cross-entropy fitted against the predicted probabilities directly (soft-target distillation, equivalent to minimizing the KL divergence between target model and surrogate). This variant never leaves probability space, which makes it robust when the exposed probabilities are quantized or saturated.
+- **`logit_ridge`** (default): when the target model's logits are accessible, the surrogate is fitted to them with ridge regression; a sigmoid (softmax in the multi-class case) converts its output back to probabilities.
+- **`prob_ce`**: when only prediction probabilities are accessible, the surrogate is fitted to them directly with cross-entropy.
 
-Both variants require only query access to predicted probabilities. The coefficients of the fitted surrogate are then used to identify the top‑k important features that influence the prediction of $x_{\text{test}}$.
+The coefficients of the fitted surrogate are then used to identify the top‑k important features that influence the prediction of $x_{\text{test}}$.
 
 ## Key Features
 
@@ -120,7 +120,7 @@ python able.py --model MLP --dataset mushroom --test-index 2 --attack HOPSKIPJUM
 | `--radius` | float | No | - | 0.5 | Neighborhood radius for local sampling |
 | `--neighbors` | int | No | - | 100 | Number of neighbors to generate |
 | `--device` | str | No | auto, cuda, cpu | auto | Computing device to use |
-| `--surrogate` | str | No | logit_ridge, prob_ce | logit_ridge | Surrogate fitting variant: ridge on target logits, or cross-entropy on predicted probabilities |
+| `--surrogate` | str | No | logit_ridge, prob_ce | logit_ridge | Surrogate variant based on model access: fit to logits or to prediction probabilities |
 
 ## Examples
 
@@ -202,7 +202,7 @@ python able.py --model MLP --dataset adult --test-index 20 --attack HOPSKIPJUMP
 - **Multiple Algorithms**: Supports gradient-based and geometric attack methods
 
 ### Explanation Quality
-- **Soft-Target Surrogates**: Two variants by model access, both trained on the target model's predicted probabilities with no hard labels: ridge regression on logits (`logit_ridge`, default) and cross-entropy on probabilities (`prob_ce`)
+- **Linear Surrogate**: Trained to mimic the target model's prediction probabilities; two variants based on model access (`logit_ridge`, `prob_ce`)
 - **Feature Ranking**: Ranks features by absolute coefficient magnitude from surrogate model
 - **Multi-Class Handling**: Properly handles multi-class surrogate coefficients
 

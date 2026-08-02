@@ -460,11 +460,12 @@ def generate_neighborhood(x0, radius=0.5, n_samples=50, clip_min=None, clip_max=
 
 class SoftLinearSurrogate:
     """
-    Linear surrogate trained on soft labels: ridge regression fitted to the
-    black box's logits, with probabilities recovered through a sigmoid
-    (softmax in the multi-class case). The model keeps the same functional
-    form as logistic regression (sigmoid of a linear function), so its
-    coefficients are used for top-k feature importance the same way.
+    Linear surrogate trained to mimic the target model's prediction
+    probabilities, for the case where the target model's logits are
+    accessible: ridge regression is fitted to the logits, and a sigmoid
+    (softmax in the multi-class case) converts the output back to
+    probabilities. Coefficients are used for top-k feature importance
+    the same way as for logistic regression.
     """
     def __init__(self, alpha=1.0):
         self.ridge = Ridge(alpha=alpha)
@@ -502,13 +503,11 @@ class SoftLinearSurrogate:
 
 class SoftCESurrogate:
     """
-    Linear surrogate trained with cross-entropy on the target model's
-    predicted probabilities (soft targets), for deployments where the model
-    exposes predicted probabilities. No hard labels are used. Implemented by
-    duplicating each point once per class, weighted by the target model's
-    probability for that class, which reproduces cross-entropy against soft
-    targets exactly (equivalent to minimizing KL(target || surrogate) over
-    the sigmoid/softmax-of-linear family).
+    Linear surrogate trained to mimic the target model's prediction
+    probabilities, for the case where only the prediction probabilities are
+    accessible: the surrogate is fitted to them directly with cross-entropy.
+    Implemented by duplicating each point once per class, weighted by the
+    target model's probability for that class.
     """
     def __init__(self, C=1.0):
         self.C = C
@@ -574,10 +573,9 @@ def generate_able_explanation(classifier, x_test, X_train, feature_names,
         neighbor_radius: Radius for neighborhood generation
         num_neighbors: Number of neighbors to generate
         top_k: Number of top features to return
-        surrogate: Surrogate fitting variant, chosen by model access level:
-            'logit_ridge' - ridge regression on the target model's logits
-                (log-odds recovered from its predicted probabilities)
-            'prob_ce' - cross-entropy on the predicted probabilities directly
+        surrogate: Surrogate variant based on model access:
+            'logit_ridge' - fit to the target model's logits (ridge regression)
+            'prob_ce' - fit to its prediction probabilities (cross-entropy)
 
     Returns:
         dict: Results containing explanation and metrics
@@ -623,14 +621,11 @@ def generate_able_explanation(classifier, x_test, X_train, feature_names,
     # Combine neighbors and adversarial examples
     X_combined = np.vstack([X_neighbors, X_adv_all])
     
-    # Get the target model's predicted probabilities for the combined data.
-    # Both surrogate variants train on these; no hard labels are used.
+    # Get the target model's prediction probabilities for the combined data
     y_pred_bb = np.asarray(classifier.predict(X_combined))
 
-    # Fit the linear surrogate according to the model access level:
-    # 'logit_ridge': ridge regression on the target model's logits, with
-    #   probabilities recovered via sigmoid (softmax for multi-class).
-    # 'prob_ce': cross-entropy against the predicted probabilities directly.
+    # Train the linear surrogate to mimic the target model's prediction
+    # probabilities, using the variant that matches the model access level.
     # The surrogate always has the same number of classes as the target
     # model, so no shape reconciliation is needed.
     if surrogate == 'prob_ce':
@@ -786,9 +781,9 @@ Examples:
         type=str,
         default='logit_ridge',
         choices=['logit_ridge', 'prob_ce'],
-        help='Surrogate fitting variant based on model access: logit_ridge '
-             '(ridge regression on the target model\'s logits, default) or '
-             'prob_ce (cross-entropy on predicted probabilities only)'
+        help='Surrogate variant based on model access: logit_ridge (fit to '
+             'the target model\'s logits, default) or prob_ce (fit to its '
+             'prediction probabilities)'
     )
 
     return parser.parse_args()
