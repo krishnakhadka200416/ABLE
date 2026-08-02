@@ -20,12 +20,7 @@ For each generated neighborhood point $D$:
 - The pair $(A, A')$ forms an adversarial bracket that closely encloses the relevant decision boundary for $x_{\text{test}}$.
 
 ### 3. Surrogate Model Training
-A linear surrogate is trained to mimic the target model in terms of its prediction probabilities at the adversarial pairs and neighborhood points. Two variants are provided, based on the level of access to the target model (`--surrogate`):
-
-- **`logit_ridge`** (default): when the target model's logits are accessible, the surrogate is fitted to them with ridge regression; a sigmoid (softmax in the multi-class case) converts its output back to probabilities.
-- **`prob_ce`**: when only prediction probabilities are accessible, the surrogate is fitted to them directly with cross-entropy.
-
-The coefficients of the fitted surrogate are then used to identify the top‑k important features that influence the prediction of $x_{\text{test}}$.
+A linear surrogate is trained to mimic the target model in terms of its prediction probabilities at the adversarial pairs and neighborhood points: the surrogate is fitted to the target model's logits with ridge regression, and a sigmoid (softmax in the multi-class case) converts its output back to probabilities. The coefficients of the fitted surrogate are then used to identify the top‑k important features that influence the prediction of $x_{\text{test}}$. (Depending on the level of access to the target model, the surrogate can alternatively be fitted to the prediction probabilities directly; see `--surrogate`.)
 
 ## Key Features
 
@@ -202,7 +197,7 @@ python able.py --model MLP --dataset adult --test-index 20 --attack HOPSKIPJUMP
 - **Multiple Algorithms**: Supports gradient-based and geometric attack methods
 
 ### Explanation Quality
-- **Linear Surrogate**: Trained to mimic the target model's prediction probabilities; two variants based on model access (`logit_ridge`, `prob_ce`)
+- **Linear Surrogate**: Trained to mimic the target model's prediction probabilities
 - **Feature Ranking**: Ranks features by absolute coefficient magnitude from surrogate model
 - **Multi-Class Handling**: Properly handles multi-class surrogate coefficients
 
